@@ -31,9 +31,18 @@ export default function Navigation() {
   const { hasLocalData, migrateLocalData, isSyncing } = useOS();
   const navigate = useNavigate();
 
-  const handleSignOut = async () => {
-    await signOut();
-    navigate('/login');
+  const handleSignOut = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('[Navigation] Sign out initiated');
+    try {
+      await signOut();
+      navigate('/login');
+    } catch (err) {
+      console.error('[Navigation] Sign out error:', err);
+      // Even if it fails, navigate to login
+      navigate('/login');
+    }
   };
 
   return (
@@ -165,8 +174,9 @@ export default function Navigation() {
         </div>
         
         <button 
+          type="button"
           onClick={handleSignOut}
-          className="w-full flex items-center justify-between px-3 py-2 text-[#4b5563] hover:text-red-400 hover:bg-red-400/5 rounded-md transition-all text-xs font-medium"
+          className="w-full flex items-center justify-between px-3 py-2 text-[#4b5563] hover:text-red-400 hover:bg-red-400/5 rounded-md transition-all text-xs font-medium cursor-pointer relative z-10"
         >
           <span>Sign Out</span>
           <LogOut size={14} />

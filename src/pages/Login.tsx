@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
 import { progressService } from '../lib/services/progressService';
-import { LogIn, Mail, Lock, Loader2, Zap, AlertCircle, Settings as SettingsIcon } from 'lucide-react';
+import { LogIn, Mail, Lock, Loader2, Zap, AlertCircle, LogOut } from 'lucide-react';
 
 const ConfigWarning = () => {
   const isMissing = !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -31,11 +32,30 @@ const ConfigWarning = () => {
 };
 
 export default function Login() {
+  const { session, user, signOut, loading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  // If we have a user and session is confirmed, go home
+  useEffect(() => {
+    if (!authLoading && user) {
+      navigate('/');
+    }
+  }, [user, authLoading, navigate]);
+
+  const handleCancelSignOut = async () => {
+    try {
+      setLoading(true);
+      await signOut();
+    } catch (err) {
+      console.error('Cancel sign out error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,6 +103,28 @@ export default function Login() {
 
         <div className="bg-[#141519] border border-[#1c1e24] p-8 rounded-2xl shadow-xl">
           <ConfigWarning />
+          {session && !user && !authLoading && (
+            <div className="mb-6 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl space-y-3">
+              <div className="flex gap-3">
+                <Mail className="text-blue-500 shrink-0" size={18} />
+                <div className="space-y-1">
+                  <p className="text-xs font-bold text-blue-500 uppercase tracking-wider">Email Confirmation Pending</p>
+                  <p className="text-[10px] text-[#b0bac8] leading-relaxed">
+                    Check your inbox (<b>{session.user.email}</b>) and follow the link to activate your system clearance.
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={handleCancelSignOut}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-2 py-2 text-[10px] bg-[#1c1e24] text-[#6b7280] hover:text-[#dde3ee] rounded-lg transition-colors font-mono disabled:opacity-50"
+              >
+                <LogOut size={12} />
+                CANCEL & SIGN OUT
+              </button>
+            </div>
+          )}
           <form onSubmit={handleLogin} className="space-y-6">
             {error && (
               <div className="bg-red-500/10 border border-red-500/20 text-red-500 text-xs p-3 rounded-lg font-mono">

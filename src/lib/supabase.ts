@@ -13,7 +13,10 @@ const getSupabase = (): SupabaseClient => {
     throw new Error('SUPABASE_CONFIG_MISSING');
   }
 
-  supabaseInstance = createClient(supabaseUrl, supabaseAnonKey);
+  // Sanitize URL: Remove /rest/v1 suffix if it exists and trailing slashes
+  const cleanUrl = supabaseUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
+
+  supabaseInstance = createClient(cleanUrl, supabaseAnonKey);
   return supabaseInstance;
 };
 

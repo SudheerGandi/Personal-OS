@@ -55,6 +55,20 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const [isSyncing, setIsSyncing] = useState(false);
   const [hasLocalData, setHasLocalData] = useState(false);
 
+  // Reset state when user logs out
+  useEffect(() => {
+    if (!user) {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        setState(JSON.parse(saved));
+        setHasLocalData(true);
+      } else {
+        setState(initialState);
+        setHasLocalData(false);
+      }
+    }
+  }, [user]);
+
   // Check for local data on mount
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);

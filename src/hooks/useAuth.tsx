@@ -72,12 +72,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }, 5000);
 
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
         
         if (!mounted) return;
 
-        setSession(session);
-        const currentUser = session?.user ?? null;
+        setSession(currentSession);
+        
+        // Only allow user in if they have confirmed their email
+        const isConfirmed = currentSession?.user?.email_confirmed_at;
+        const currentUser = isConfirmed ? (currentSession?.user ?? null) : null;
+        
+        if (currentSession?.user && !isConfirmed) {
+          console.warn('[Auth] Email not confirmed yet');
+        }
+
         setUser(currentUser);
         
         if (currentUser) {
@@ -98,7 +106,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!mounted) return;
       
       setSession(session);
-      const currentUser = session?.user ?? null;
+      
+      const isConfirmed = session?.user?.email_confirmed_at;
+      const currentUser = isConfirmed ? (session?.user ?? null) : null;
       setUser(currentUser);
       
       if (currentUser) {
@@ -106,6 +116,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (mounted) setProfile(p);
       } else {
         setProfile(null);
+        // If there's a session but no currentUser (unconfirmed), ensure we transition out of loading
+        if (session) {
+          console.warn('[Auth] Session exists but user is unconfirmed or hidden');
+        }
       }
       setLoading(false);
     });
@@ -117,7 +131,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    console.log('[Auth] Sign out initiated');
+    
+    // 1. Force clear local React state immediately
+    setUser(null);
+    setProfile(null);
+    setSession(null);
+    setLoading(false);
+
+    try {
+      // 2. Clear storage manually first
+      const keys = Object.keys(localStorage);
+      keys.forEach(key => {
+        if (key.startsWith('sb-') || key.includes('supabase') || key.includes('execution')) {
+          localStorage.removeItem(key);
+        }
+      });
+      console.log('[Auth] Local storage cleared');
+    } catch (e) {
+      console.warn('Error clearing storage:', e);
+    }
+
+    // 3. Attempt supabase sign out (best effort)
+    try {
+      // We don't await this indefinitely to prevent UI hangs
+      const signOutPromise = supabase.auth.signOut({ scope: 'local' });
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Sign out timeout')), 1500)
+      );
+      
+      await Promise.race([signOutPromise, timeoutPromise]);
+      console.log('[Auth] Supabase sign out successful');
+    } catch (err) {
+      console.warn('[Auth] Supabase sign out warning (non-fatal):', err);
+    } finally {
+      // 4. Final Escape Hatch: Hard reload
+      console.log('[Auth] Finalizing sign out with reload');
+      window.location.href = '/login';
+      // If href doesn't trigger immediately, force it
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
+    }
   };
 
   const isMaster = profile?.role === 'MASTER' || (user?.email === masterEmail && masterEmail !== undefined);
