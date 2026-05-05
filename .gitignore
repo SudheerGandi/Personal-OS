@@ -6,3 +6,15 @@ coverage/
 *.log
 .env*
 !.env.example
+firebase-applet-config.json
+firebase-blueprint.json
+firestore.rules
+.supabase/
+.vercel/
+.netlify/
+.vscode/
+.idea/
+*.local
+*.secret
+credentials.json
+service-account.json

@@ -41,11 +41,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .single();
 
       if (error) {
-        if (error.code === 'PGRST116') {
-          // Profile not found, but user exists in auth. 
-          // This might happen if registration is pending or failed partway.
-          return null;
-        }
+        if (error.code === 'PGRST116') return null;
         console.error('Error fetching profile:', error);
         return null;
       }
@@ -64,38 +60,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    // Check active sessions and sets the user
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-      
-      if (currentUser) {
-        fetchProfile(currentUser.id).then(p => {
-          setProfile(p);
-          setLoading(false);
-        });
-      } else {
-        setLoading(false);
-      }
-    });
+    let mounted = true;
 
-    // Listen for changes on auth state (logged in, signed out, etc.)
+    const initAuth = async () => {
+      // Safety timeout: stop loading after 5s if nothing happens
+      const timeout = setTimeout(() => {
+        if (mounted && loading) {
+          console.warn('[Auth] Initialization timed out. Proceeding as guest.');
+          setLoading(false);
+        }
+      }, 5000);
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!mounted) return;
+
+        setSession(session);
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
+        
+        if (currentUser) {
+          const p = await fetchProfile(currentUser.id);
+          if (mounted) setProfile(p);
+        }
+      } catch (err) {
+        console.error('Auth initialization error:', err);
+      } finally {
+        clearTimeout(timeout);
+        if (mounted) setLoading(false);
+      }
+    };
+
+    initAuth();
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!mounted) return;
+      
       setSession(session);
       const currentUser = session?.user ?? null;
       setUser(currentUser);
       
       if (currentUser) {
         const p = await fetchProfile(currentUser.id);
-        setProfile(p);
+        if (mounted) setProfile(p);
       } else {
         setProfile(null);
       }
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signOut = async () => {

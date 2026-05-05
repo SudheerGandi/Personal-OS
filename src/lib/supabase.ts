@@ -5,34 +5,47 @@ let supabaseInstance: SupabaseClient | null = null;
 const getSupabase = (): SupabaseClient => {
   if (supabaseInstance) return supabaseInstance;
 
-  let supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
   const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    // We throw a more descriptive error that will be caught by the usage site
+  // If config is missing or placeholder, we return the dummy client via the proxy catch block
+  if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('your_supabase')) {
     throw new Error('SUPABASE_CONFIG_MISSING');
   }
 
-  // Sanitize URL: Remove /rest/v1 suffix if it exists
-  supabaseUrl = supabaseUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
-
-  console.log('[Supabase] Initializing with URL:', supabaseUrl.substring(0, 20) + '...');
   supabaseInstance = createClient(supabaseUrl, supabaseAnonKey);
   return supabaseInstance;
 };
 
-// We export a proxy that lazily initializes the supabase client
-// This prevents module-load time crashes while keeping the API compatible
+// This proxy allows the app to load even if environment variables are missing
 export const supabase = new Proxy({} as SupabaseClient, {
-  get: (_, prop) => {
+  get: (target, prop) => {
     try {
       const client = getSupabase();
-      return (client as any)[prop];
+      const value = (client as any)[prop];
+
+      // Fix for internal 'this' binding in supabase-js
+      if (typeof value === 'function') {
+        return value.bind(client);
+      }
+
+      // Deep proxy for 'auth' to handle its methods too
+      if (prop === 'auth' && typeof value === 'object' && value !== null) {
+        return new Proxy(value, {
+          get: (authTarget, authProp) => {
+            const authValue = (authTarget as any)[authProp];
+            if (typeof authValue === 'function') {
+              return authValue.bind(authTarget);
+            }
+            return authValue;
+          }
+        });
+      }
+
+      return value;
     } catch (e: any) {
       if (e.message === 'SUPABASE_CONFIG_MISSING') {
-        // Return a dummy object that fails gracefully on major calls
-        // This allows the app to mount and show a login screen or warning 
-        // instead of a white screen crash
+        // Safe mocks for auth methods to prevent crashes
         if (prop === 'auth') {
           return {
             onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
@@ -43,20 +56,18 @@ export const supabase = new Proxy({} as SupabaseClient, {
           };
         }
         if (prop === 'from') {
-          return () => ({
-            select: () => ({
-              eq: () => ({
-                single: async () => ({ data: null, error: { message: 'Supabase URL not configured' } }),
-                order: () => ({ data: [], error: { message: 'Supabase URL not configured' } }),
-              }),
-              order: () => ({ data: [], error: { message: 'Supabase URL not configured' } }),
-            }),
-            upsert: async () => ({ error: { message: 'Supabase URL not configured' } }),
-            insert: async () => ({ error: { message: 'Supabase URL not configured' } }),
+          const dummy: any = () => ({
+            select: () => dummy(),
+            eq: () => dummy(),
+            single: async () => ({ data: null, error: { message: 'Supabase not configured' } }),
+            then: (res: any) => res({ data: null, error: null }),
           });
+          return dummy;
         }
+        return (target as any)[prop];
       }
       throw e;
     }
   }
 });
+
