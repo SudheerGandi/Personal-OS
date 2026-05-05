@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { progressService } from '../lib/services/progressService';
 import { LogIn, Mail, Lock, Loader2, Zap, AlertCircle, Settings as SettingsIcon } from 'lucide-react';
 
 const ConfigWarning = () => {
