@@ -31,7 +31,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   const masterEmail = import.meta.env.VITE_MASTER_EMAIL;
-  const hardcodedMaster = 'ce21b049@smail.iitm.ac.in';
 
   const fetchProfile = async (userId: string) => {
     try {
@@ -137,12 +136,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Force local master check and state sync - use lowercase for foolproof matching
   const normalizedUserEmail = user?.email?.toLowerCase();
-  const normalizedMasterEmail = masterEmail?.toLowerCase();
-  const normalizedHardcodedMaster = hardcodedMaster.toLowerCase();
+  const adminEmails = [
+    masterEmail?.toLowerCase(),
+    'sudheergandi060803@gmail.com',
+    'ce21b049@smail.iitm.ac.in'
+  ].filter(Boolean);
 
   const isMaster = profile?.role === 'MASTER' || 
-                   (normalizedUserEmail === normalizedMasterEmail && normalizedMasterEmail !== undefined) || 
-                   (normalizedUserEmail === normalizedHardcodedMaster);
+                   (normalizedUserEmail && adminEmails.includes(normalizedUserEmail));
 
   // Sync role to localStorage to help other tabs if real-time is slow
   useEffect(() => {
