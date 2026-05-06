@@ -206,47 +206,46 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
       loadProgress();
 
+      console.log(`[Sync] Initializing real-time sync for ${user.id}`);
+      
       // Consolidated real-time channel
+      const channelLabel = `user-sync-${user.id}-${Math.random().toString(36).substr(2, 5)}`;
       channel = supabase
-        .channel(`user-sync-${user.id}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'history_events', filter: `user_id=eq.${user.id}` }, () => {
-          console.log('[Sync] History updated');
+        .channel(channelLabel)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'history_events', filter: `user_id=eq.${user.id}` }, (payload) => {
+          console.log('[Sync] History event detected:', payload.eventType);
           loadProgress(true);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'completed_commands', filter: `user_id=eq.${user.id}` }, () => {
-          console.log('[Sync] Commands updated');
+          console.log('[Sync] Command completion detected');
           loadProgress(true);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'rule_logs', filter: `user_id=eq.${user.id}` }, () => {
-          console.log('[Sync] Rules updated');
+          console.log('[Sync] Rule log updated');
           loadProgress(true);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'signal_logs', filter: `user_id=eq.${user.id}` }, () => {
-          console.log('[Sync] Signals updated');
+          console.log('[Sync] Signal updated');
           loadProgress(true);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'reading_progress', filter: `user_id=eq.${user.id}` }, () => {
-          console.log('[Sync] Reading updated');
           loadProgress(true);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'skill_reps', filter: `user_id=eq.${user.id}` }, () => {
-          console.log('[Sync] Skills updated');
           loadProgress(true);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'podcast_logs', filter: `user_id=eq.${user.id}` }, () => {
-          console.log('[Sync] Podcasts updated');
           loadProgress(true);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'business_decode_entries', filter: `user_id=eq.${user.id}` }, () => {
-          console.log('[Sync] Business decodes updated');
           loadProgress(true);
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` }, () => {
-          console.log('[Sync] Profile role/status updated');
+          console.log('[Sync] Profile change detected');
           loadProgress(true);
         })
-        .subscribe((status) => {
-          console.log(`[Sync] Channel status: ${status}`);
+        .subscribe((status, err) => {
+          console.log(`[Sync] Channel status: ${status}`, err || '');
         });
 
       return () => {

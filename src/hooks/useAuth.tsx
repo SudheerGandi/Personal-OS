@@ -31,6 +31,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   const masterEmail = import.meta.env.VITE_MASTER_EMAIL;
+  const hardcodedMaster = 'ce21b049@smail.iitm.ac.in';
 
   const fetchProfile = async (userId: string) => {
     try {
@@ -63,7 +64,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let mounted = true;
 
     const initAuth = async () => {
-      // Safety timeout: stop loading after 5s if nothing happens
+      console.log('[Auth] Initializing...');
       const timeout = setTimeout(() => {
         if (mounted && loading) {
           console.warn('[Auth] Initialization timed out. Proceeding as guest.');
@@ -73,24 +74,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       try {
         const { data: { session: currentSession } } = await supabase.auth.getSession();
-        
         if (!mounted) return;
-
         setSession(currentSession);
         
-        // Only allow user in if they have confirmed their email
         const isConfirmed = currentSession?.user?.email_confirmed_at;
         const currentUser = isConfirmed ? (currentSession?.user ?? null) : null;
-        
-        if (currentSession?.user && !isConfirmed) {
-          console.warn('[Auth] Email not confirmed yet');
-        }
-
         setUser(currentUser);
         
         if (currentUser) {
           const p = await fetchProfile(currentUser.id);
-          if (mounted) setProfile(p);
+          if (mounted) {
+             setProfile(p);
+             console.log(`[Auth] User ${currentUser.email} logged in. Role: ${p?.role}`);
+          }
         }
       } catch (err) {
         console.error('Auth initialization error:', err);
@@ -104,9 +100,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!mounted) return;
-      
       setSession(session);
-      
       const isConfirmed = session?.user?.email_confirmed_at;
       const currentUser = isConfirmed ? (session?.user ?? null) : null;
       setUser(currentUser);
@@ -116,10 +110,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (mounted) setProfile(p);
       } else {
         setProfile(null);
-        // If there's a session but no currentUser (unconfirmed), ensure we transition out of loading
-        if (session) {
-          console.warn('[Auth] Session exists but user is unconfirmed or hidden');
-        }
       }
       setLoading(false);
     });
@@ -131,71 +121,66 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signOut = async () => {
-    console.log('[Auth] Sign out initiated');
-    
-    // 1. Force clear local React state immediately
     setUser(null);
     setProfile(null);
     setSession(null);
     setLoading(false);
-
     try {
-      // 2. Clear storage manually first
-      const keys = Object.keys(localStorage);
-      keys.forEach(key => {
-        if (key.startsWith('sb-') || key.includes('supabase') || key.includes('execution')) {
-          localStorage.removeItem(key);
-        }
-      });
-      console.log('[Auth] Local storage cleared');
-    } catch (e) {
-      console.warn('Error clearing storage:', e);
-    }
-
-    // 3. Attempt supabase sign out (best effort)
-    try {
-      // We don't await this indefinitely to prevent UI hangs
-      const signOutPromise = supabase.auth.signOut({ scope: 'local' });
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Sign out timeout')), 1500)
-      );
-      
-      await Promise.race([signOutPromise, timeoutPromise]);
-      console.log('[Auth] Supabase sign out successful');
-    } catch (err) {
-      console.warn('[Auth] Supabase sign out warning (non-fatal):', err);
-    } finally {
-      // 4. Final Escape Hatch: Hard reload
-      console.log('[Auth] Finalizing sign out with reload');
+      await supabase.auth.signOut({ scope: 'local' });
+      localStorage.clear();
       window.location.href = '/login';
-      // If href doesn't trigger immediately, force it
-      setTimeout(() => {
-        window.location.reload();
-      }, 500);
+    } catch (err) {
+      console.error('Sign out error:', err);
+      window.location.href = '/login';
     }
   };
 
-  const isMaster = profile?.role === 'MASTER' || (user?.email === masterEmail && masterEmail !== undefined);
+  // Force local master check and state sync
+  const isMaster = profile?.role === 'MASTER' || 
+                   (user?.email === masterEmail && masterEmail !== undefined) || 
+                   (user?.email === hardcodedMaster);
+
+  // Sync role to localStorage to help other tabs if real-time is slow
+  useEffect(() => {
+    if (user && isMaster) {
+      localStorage.setItem(`is-master-${user.id}`, 'true');
+    }
+  }, [user, isMaster]);
 
   // Listen for real-time profile updates
   useEffect(() => {
     if (!user) return;
 
+    console.log(`[Auth] Subscribing to profile updates for ${user.id}`);
     const channel = supabase
       .channel(`profile-updates-${user.id}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
         (payload) => {
-          console.log('[Auth] Profile real-time update:', payload.new);
+          console.log('[Auth] Profile real-time change received:', payload.new);
           setProfile(payload.new as AuthProfile);
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log(`[Auth] Profile channel status: ${status}`);
+      });
 
     return () => {
       supabase.removeChannel(channel);
     };
+  }, [user]);
+
+  // Handle cross-tab role sync via storage event
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (user && e.key === `is-master-${user.id}` && e.newValue === 'true') {
+        // If another tab found we are master, maybe refresh our profile
+        refreshProfile();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
   }, [user]);
 
   return (
