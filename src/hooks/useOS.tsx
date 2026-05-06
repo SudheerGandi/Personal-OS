@@ -55,6 +55,54 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const [isSyncing, setIsSyncing] = useState(false);
   const [hasLocalData, setHasLocalData] = useState(false);
 
+  // Set current date, week and day on mount and check periodically
+  useEffect(() => {
+    const updateDate = () => {
+      const d = new Date();
+      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const startDateStr = localStorage.getItem('execution-cockpit-start-date') || START_DATE;
+      
+      const startDate = new Date(startDateStr);
+      const currDate = new Date(today);
+      
+      const diffTime = currDate.getTime() - startDate.getTime();
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+      const actualDiffDays = Math.max(1, diffDays);
+      
+      const week = Math.floor((actualDiffDays - 1) / 7) + 1;
+      const day = (actualDiffDays - 1) % 7 + 1;
+
+      setState(prev => {
+        if (prev.date === today) return prev;
+        return {
+          ...prev,
+          date: today,
+          week,
+          day
+        };
+      });
+
+      if (!localStorage.getItem('execution-cockpit-start-date')) {
+        localStorage.setItem('execution-cockpit-start-date', START_DATE);
+      }
+    };
+
+    updateDate();
+    const interval = setInterval(updateDate, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, []);
+
+  // Listen for cross-tab updates (for non-logged in users)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY && e.newValue && !user) {
+        setState(JSON.parse(e.newValue));
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [user]);
+
   // Reset state when user logs out
   useEffect(() => {
     if (!user) {
@@ -80,39 +128,84 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   }, [user]);
 
-  // Load from DB when user logs in
+  // Save to local storage on changes (only if not logged in)
   useEffect(() => {
+    if (!user && state !== initialState) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+  }, [state, user]);
+
+  // Load and subscribe to DB progress when user logs in
+  useEffect(() => {
+    let isMounted = true;
     if (user) {
       const loadProgress = async () => {
+        if (!isMounted) return;
         setIsSyncing(true);
         try {
-          const [history, completed] = await Promise.all([
+          // Parallel fetch with error resilience
+          const results = await Promise.allSettled([
             progressService.getUserHistory(user.id),
-            progressService.getCompletedCommands(user.id)
+            progressService.getCompletedCommands(user.id),
+            supabase.from('rule_logs').select('*').eq('user_id', user.id),
+            supabase.from('signal_logs').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
+            supabase.from('reading_progress').select('*').eq('user_id', user.id),
+            supabase.from('skill_reps').select('*').eq('user_id', user.id)
           ]);
 
-          // Update state with DB data
-          setState(prev => ({
-            ...prev,
-            history: history.map((e: any) => ({
-              id: e.id,
-              timestamp: new Date(e.created_at).getTime(),
-              type: e.event_type as any,
-              title: e.title,
-              source: e.source,
-              taskId: e.metadata?.taskId,
-              notes: e.metadata?.notes
-            })),
-            completedTasks: completed.map((c: any) => c.command_id)
-          }));
+          const history = results[0].status === 'fulfilled' ? results[0].value : [];
+          const completed = results[1].status === 'fulfilled' ? results[1].value : [];
+          const ruleLogs = results[2].status === 'fulfilled' ? results[2].value.data : [];
+          const signals = results[3].status === 'fulfilled' ? results[3].value.data : [];
+          const reading = results[4].status === 'fulfilled' ? results[4].value.data : [];
+          const skills = results[5].status === 'fulfilled' ? results[5].value.data : [];
+
+          const ruleLogsMap: { [key: string]: number } = {};
+          if (ruleLogs) {
+            ruleLogs.forEach((log: any) => {
+              if (log.problems_written) ruleLogsMap['1'] = (ruleLogsMap['1'] || 0) + log.problems_written;
+            });
+          }
+
+          if (isMounted) {
+            setState(prev => ({
+              ...prev,
+              history: (history || []).map((e: any) => ({
+                id: e.id,
+                timestamp: new Date(e.created_at).getTime(),
+                type: e.event_type as any,
+                title: e.title,
+                source: e.source,
+                taskId: e.metadata?.taskId,
+                notes: e.metadata?.notes
+              })),
+              completedTasks: (completed || []).map((c: any) => c.command_id),
+              ruleLogs: ruleLogsMap,
+              intelligenceSignals: (signals || []).map((s: any) => ({ bucket: s.bucket_id, content: s.signal })),
+              readingProgress: (reading || []).reduce((acc: any, r: any) => ({ ...acc, [r.reading_id]: r.completed }), {}),
+              skillReps: (skills || []).reduce((acc: any, s: any) => ({ ...acc, [s.skill_id]: (acc[s.skill_id] || 0) + 1 }), {})
+            }));
+          }
         } catch (err) {
           console.error('Error loading progress:', err);
         } finally {
-          setIsSyncing(false);
+          if (isMounted) setIsSyncing(false);
         }
       };
 
       loadProgress();
+
+      const channel = supabase
+        .channel(`user-progress-${user.id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'history_events', filter: `user_id=eq.${user.id}` }, () => loadProgress())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'completed_commands', filter: `user_id=eq.${user.id}` }, () => loadProgress())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rule_logs', filter: `user_id=eq.${user.id}` }, () => loadProgress())
+        .subscribe();
+
+      return () => {
+        isMounted = false;
+        supabase.removeChannel(channel);
+      };
     }
   }, [user]);
 

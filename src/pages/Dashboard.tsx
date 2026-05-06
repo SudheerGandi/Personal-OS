@@ -10,8 +10,10 @@ export default function Dashboard() {
 
   const todayCompleted = state.history.filter(e => {
     if (e.type !== 'task_completed') return false;
-    const eventDate = new Date(e.timestamp).toISOString().split('T')[0];
-    return eventDate === state.date;
+    const d = new Date(e.timestamp);
+    const eventDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    // Use substring(0, 10) to handle any potential appended time info if state.date changed format
+    return eventDate === state.date.substring(0, 10);
   });
 
   const nextTask = commands[0];
