@@ -138,10 +138,13 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   // Load and subscribe to DB progress when user logs in
   useEffect(() => {
     let isMounted = true;
+    let channel: any = null;
+
     if (user) {
-      const loadProgress = async () => {
+      const loadProgress = async (isRealtimeUpdate = false) => {
         if (!isMounted) return;
-        setIsSyncing(true);
+        if (!isRealtimeUpdate) setIsSyncing(true);
+        
         try {
           // Parallel fetch with error resilience
           const results = await Promise.allSettled([
@@ -150,7 +153,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             supabase.from('rule_logs').select('*').eq('user_id', user.id),
             supabase.from('signal_logs').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
             supabase.from('reading_progress').select('*').eq('user_id', user.id),
-            supabase.from('skill_reps').select('*').eq('user_id', user.id)
+            supabase.from('skill_reps').select('*').eq('user_id', user.id),
+            supabase.from('podcast_logs').select('*').eq('user_id', user.id)
           ]);
 
           const history = results[0].status === 'fulfilled' ? results[0].value : [];
@@ -159,11 +163,17 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           const signals = results[3].status === 'fulfilled' ? results[3].value.data : [];
           const reading = results[4].status === 'fulfilled' ? results[4].value.data : [];
           const skills = results[5].status === 'fulfilled' ? results[5].value.data : [];
+          const podcasts = results[6].status === 'fulfilled' ? results[6].value.data : [];
 
+          const today = new Date().toISOString().split('T')[0];
           const ruleLogsMap: { [key: string]: number } = {};
           if (ruleLogs) {
             ruleLogs.forEach((log: any) => {
-              if (log.problems_written) ruleLogsMap['1'] = (ruleLogsMap['1'] || 0) + log.problems_written;
+              // Only include today's logs for the dashboard counter
+              if (log.log_date === today) {
+                if (log.problems_written) ruleLogsMap['1'] = (ruleLogsMap['1'] || 0) + log.problems_written;
+                if (log.outreaches_sent) ruleLogsMap['4'] = (ruleLogsMap['4'] || 0) + log.outreaches_sent;
+              }
             });
           }
 
@@ -177,34 +187,71 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 title: e.title,
                 source: e.source,
                 taskId: e.metadata?.taskId,
-                notes: e.metadata?.notes
+                notes: e.metadata?.notes || e.metadata?.timestamp?.toString() // Fallback
               })),
               completedTasks: (completed || []).map((c: any) => c.command_id),
               ruleLogs: ruleLogsMap,
               intelligenceSignals: (signals || []).map((s: any) => ({ bucket: s.bucket_id, content: s.signal })),
               readingProgress: (reading || []).reduce((acc: any, r: any) => ({ ...acc, [r.reading_id]: r.completed }), {}),
-              skillReps: (skills || []).reduce((acc: any, s: any) => ({ ...acc, [s.skill_id]: (acc[s.skill_id] || 0) + 1 }), {})
+              skillReps: (skills || []).reduce((acc: any, s: any) => ({ ...acc, [s.skill_id]: (acc[s.skill_id] || 0) + 1 }), {}),
+              podcastListened: (podcasts || []).map((p: any) => p.podcast_id)
             }));
           }
         } catch (err) {
-          console.error('Error loading progress:', err);
+          console.error('Error in loadProgress:', err);
         } finally {
-          if (isMounted) setIsSyncing(false);
+          if (isMounted && !isRealtimeUpdate) setIsSyncing(false);
         }
       };
 
       loadProgress();
 
-      const channel = supabase
-        .channel(`user-progress-${user.id}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'history_events', filter: `user_id=eq.${user.id}` }, () => loadProgress())
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'completed_commands', filter: `user_id=eq.${user.id}` }, () => loadProgress())
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'rule_logs', filter: `user_id=eq.${user.id}` }, () => loadProgress())
-        .subscribe();
+      // Consolidated real-time channel
+      channel = supabase
+        .channel(`user-sync-${user.id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'history_events', filter: `user_id=eq.${user.id}` }, () => {
+          console.log('[Sync] History updated');
+          loadProgress(true);
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'completed_commands', filter: `user_id=eq.${user.id}` }, () => {
+          console.log('[Sync] Commands updated');
+          loadProgress(true);
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rule_logs', filter: `user_id=eq.${user.id}` }, () => {
+          console.log('[Sync] Rules updated');
+          loadProgress(true);
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'signal_logs', filter: `user_id=eq.${user.id}` }, () => {
+          console.log('[Sync] Signals updated');
+          loadProgress(true);
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reading_progress', filter: `user_id=eq.${user.id}` }, () => {
+          console.log('[Sync] Reading updated');
+          loadProgress(true);
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'skill_reps', filter: `user_id=eq.${user.id}` }, () => {
+          console.log('[Sync] Skills updated');
+          loadProgress(true);
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'podcast_logs', filter: `user_id=eq.${user.id}` }, () => {
+          console.log('[Sync] Podcasts updated');
+          loadProgress(true);
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'business_decode_entries', filter: `user_id=eq.${user.id}` }, () => {
+          console.log('[Sync] Business decodes updated');
+          loadProgress(true);
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` }, () => {
+          console.log('[Sync] Profile role/status updated');
+          loadProgress(true);
+        })
+        .subscribe((status) => {
+          console.log(`[Sync] Channel status: ${status}`);
+        });
 
       return () => {
         isMounted = false;
-        supabase.removeChannel(channel);
+        if (channel) supabase.removeChannel(channel);
       };
     }
   }, [user]);

@@ -5,15 +5,20 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Command } from '../types';
 
 export default function Dashboard() {
-  const { state, commands, completeTask, missTask, undoTask } = useOS();
+  const { state, commands, completeTask, missTask, undoTask, isSyncing } = useOS();
   const [selectedCommand, setSelectedCommand] = useState<Command | null>(null);
+
+  // Use a stable reference to "today" for matching
+  const todayStr = state.date.substring(0, 10);
 
   const todayCompleted = state.history.filter(e => {
     if (e.type !== 'task_completed') return false;
+    // Handle both number (Date.now()) and ISO string formats
     const d = new Date(e.timestamp);
+    if (isNaN(d.getTime())) return false;
+    
     const eventDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    // Use substring(0, 10) to handle any potential appended time info if state.date changed format
-    return eventDate === state.date.substring(0, 10);
+    return eventDate === todayStr;
   });
 
   const nextTask = commands[0];
@@ -23,6 +28,16 @@ export default function Dashboard() {
   return (
     <div className="p-8 pb-24">
       {/* Top Dashboard Strip */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xs font-mono tracking-[0.3em] text-[#4b5563] uppercase flex items-center gap-2">
+          <Terminal size={12} /> Execution Cockpit v1.0 
+          {isSyncing && <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[#e8622a] flex items-center gap-1"><Clock size={10} className="animate-spin" /> SYNCING...</motion.span>}
+        </h2>
+        {state.history.length > 0 && (
+          <span className="text-[10px] font-mono text-[#6b7280]">LATEST EVENT: {new Date(state.history[0].timestamp).toLocaleTimeString()}</span>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 gap-4 mb-8">
         <StatCard label="DATE" value={state.date} icon={Clock} />
         <StatCard label="WEEK/DAY" value={`W${state.week} D${state.day}`} icon={Target} />

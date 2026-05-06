@@ -177,6 +177,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const isMaster = profile?.role === 'MASTER' || (user?.email === masterEmail && masterEmail !== undefined);
 
+  // Listen for real-time profile updates
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel(`profile-updates-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
+        (payload) => {
+          console.log('[Auth] Profile real-time update:', payload.new);
+          setProfile(payload.new as AuthProfile);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
   return (
     <AuthContext.Provider value={{ user, profile, session, loading, signOut, isMaster, refreshProfile }}>
       {children}
