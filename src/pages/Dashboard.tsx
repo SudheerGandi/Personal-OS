@@ -9,16 +9,18 @@ export default function Dashboard() {
   const [selectedCommand, setSelectedCommand] = useState<Command | null>(null);
 
   // Use a stable reference to "today" for matching
-  const todayStr = state.date.substring(0, 10);
+  // Using local date string to match user's actual day
+  const d = new Date();
+  const currentLocalDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
   const todayCompleted = state.history.filter(e => {
     if (e.type !== 'task_completed') return false;
     // Handle both number (Date.now()) and ISO string formats
-    const d = new Date(e.timestamp);
-    if (isNaN(d.getTime())) return false;
+    const dateObj = new Date(e.timestamp);
+    if (isNaN(dateObj.getTime())) return false;
     
-    const eventDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    return eventDate === todayStr;
+    const eventDate = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+    return eventDate === currentLocalDate;
   });
 
   const nextTask = commands[0];

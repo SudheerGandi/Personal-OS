@@ -135,10 +135,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Force local master check and state sync
+  // Force local master check and state sync - use lowercase for foolproof matching
+  const normalizedUserEmail = user?.email?.toLowerCase();
+  const normalizedMasterEmail = masterEmail?.toLowerCase();
+  const normalizedHardcodedMaster = hardcodedMaster.toLowerCase();
+
   const isMaster = profile?.role === 'MASTER' || 
-                   (user?.email === masterEmail && masterEmail !== undefined) || 
-                   (user?.email === hardcodedMaster);
+                   (normalizedUserEmail === normalizedMasterEmail && normalizedMasterEmail !== undefined) || 
+                   (normalizedUserEmail === normalizedHardcodedMaster);
 
   // Sync role to localStorage to help other tabs if real-time is slow
   useEffect(() => {
