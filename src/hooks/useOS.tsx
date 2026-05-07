@@ -307,13 +307,14 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
 
-  const commands = React.useMemo(() => {
-    const today: Command[] = [];
-    const dayOfWeek = new Date(state.date).getDay();
+  const generateCommands = (dateStr: string, week: number, day: number) => {
+    const list: Command[] = [];
+    const date = new Date(dateStr);
+    const dayOfWeek = date.getDay();
 
     // 1. Rules (Daily)
-    today.push({
-      id: `${state.date}-rule-1`,
+    list.push({
+      id: `${dateStr}-rule-1`,
       title: 'Write 5 problems before breakfast',
       source: 'Rule',
       timeWindow: 'Morning',
@@ -327,11 +328,11 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     });
 
     // 2. AI Roadmap
-    const weekData = aiRoadmap.find(w => w.week === state.week);
+    const weekData = aiRoadmap.find(w => w.week === week);
     if (weekData) {
-      today.push({
-        id: `ai-roadmap-w${state.week}-d${state.day}`,
-        title: `AI Study: ${weekData.title} (Part ${state.day})`,
+      list.push({
+        id: `ai-roadmap-w${week}-d${day}`,
+        title: `AI Study: ${weekData.title} (Part ${day})`,
         source: 'AI Roadmap',
         timeWindow: 'Morning',
         duration: '2h',
@@ -347,11 +348,11 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     // 3. Books
     const currentBook = books.find(b => {
       const [start, end] = b.weeks.split('–').map(Number);
-      return state.week >= start && state.week <= (end || start);
+      return week >= start && week <= (end || start);
     });
     if (currentBook) {
-      today.push({
-        id: `${state.date}-book-${currentBook.title}`,
+      list.push({
+        id: `${dateStr}-book-${currentBook.title}`,
         title: `Reading: ${currentBook.title}`,
         source: 'Book',
         timeWindow: 'Morning',
@@ -366,10 +367,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
 
     // 4. Skills
-    const currentSkill = skills.find(s => s.id === state.day % 8 || 1);
+    const currentSkill = skills.find(s => s.id === day % 8 || 1);
     if (currentSkill) {
-      today.push({
-        id: `${state.date}-skill-${currentSkill.id}`,
+      list.push({
+        id: `${dateStr}-skill-${currentSkill.id}`,
         title: `Skill Drill: ${currentSkill.name}`,
         source: 'Skill Drill',
         timeWindow: 'Morning',
@@ -385,8 +386,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     // 5. Business Rotation (Monday = Sales)
     if (dayOfWeek === 1) {
-       today.push({
-        id: `${state.date}-biz-rot-sales`,
+       list.push({
+        id: `${dateStr}-biz-rot-sales`,
         title: 'Sales & Copywriting Block',
         source: 'Business Rotation',
         timeWindow: 'Afternoon',
@@ -401,8 +402,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
 
     // 6. Outreach
-    today.push({
-      id: `${state.date}-outreach-daily`,
+    list.push({
+      id: `${dateStr}-outreach-daily`,
       title: 'Send 5 Outreaches',
       source: 'Rule',
       timeWindow: 'Afternoon',
@@ -416,8 +417,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     });
 
     // 7. Intelligence
-    today.push({
-      id: `${state.date}-intel-scan`,
+    list.push({
+      id: `${dateStr}-intel-scan`,
       title: '5-Bucket Intelligence Scan',
       source: 'Intelligence',
       timeWindow: 'Evening',
@@ -430,8 +431,52 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       output: '2 signals logged'
     });
 
-    return today.filter(c => !state.completedTasks.includes(c.id) && !state.missedTasks.includes(c.id));
+    return list;
+  };
+
+  const { commands, carryovers } = React.useMemo(() => {
+    // 1. Calculate Today's Commands
+    const todayCommands = generateCommands(state.date, state.week, state.day);
+    const pendingToday = todayCommands.filter(c => !state.completedTasks.includes(c.id) && !state.missedTasks.includes(c.id));
+
+    // 2. Calculate Carryovers (Historical missed tasks)
+    const carryList: Command[] = [];
+    const startDateStr = localStorage.getItem('execution-cockpit-start-date') || START_DATE;
+    const start = new Date(startDateStr);
+    const today = new Date(state.date);
+    
+    // Iterate from start to yesterday
+    const current = new Date(start);
+    while (current < today) {
+      const dStr = current.toISOString().split('T')[0];
+      
+      const diffTime = current.getTime() - start.getTime();
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+      const week = Math.floor((diffDays - 1) / 7) + 1;
+      const day = (diffDays - 1) % 7 + 1;
+
+      const dayCommands = generateCommands(dStr, week, day);
+      const missed = dayCommands.filter(c => 
+        !state.completedTasks.includes(c.id) && 
+        !state.missedTasks.includes(c.id)
+      );
+
+      // Map missed tasks as Carryover source
+      carryList.push(...missed.map(m => ({ ...m, source: 'Carryover' as const })));
+      
+      current.setDate(current.getDate() + 1);
+    }
+
+    return { commands: pendingToday, carryovers: carryList };
   }, [state.date, state.week, state.day, state.completedTasks, state.missedTasks]);
+
+  // Update carryovers in state for the rest of the app to see
+  useEffect(() => {
+    setState(prev => {
+      if (JSON.stringify(prev.carryovers) === JSON.stringify(carryovers)) return prev;
+      return { ...prev, carryovers };
+    });
+  }, [carryovers]);
 
   const completeTask = async (id: string, source: string, title: string) => {
     const event: HistoryEvent = {

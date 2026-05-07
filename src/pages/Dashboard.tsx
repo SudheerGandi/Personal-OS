@@ -114,6 +114,43 @@ export default function Dashboard() {
 
           {/* Command Queue */}
           <section>
+            {state.carryovers.length > 0 && (
+              <div className="mb-10">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xs font-mono tracking-widest text-[#e8622a] uppercase flex items-center gap-2">
+                    <ArrowRight size={12} /> Carryover Ledger (Untracked)
+                  </h3>
+                  <span className="text-[10px] font-mono text-[#e8622a] bg-[#e8622a]/10 px-2 py-0.5 rounded">{state.carryovers.length} PENDING</span>
+                </div>
+                <div className="space-y-3">
+                  {state.carryovers.slice(0, 5).map((cmd, idx) => (
+                    <div 
+                      key={cmd.id}
+                      onClick={() => setSelectedCommand(cmd)}
+                      className="bg-[#141519]/60 border border-[#e8622a]/20 hover:border-[#e8622a]/40 p-4 rounded-md flex items-center gap-4 group cursor-pointer transition-all"
+                    >
+                      <div className="text-[10px] font-mono text-[#e8622a]/50 w-4">{idx + 1}</div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#e8622a]/5 text-[#e8622a]/70 border border-[#e8622a]/20">CARRYOVER</span>
+                          <h5 className="font-semibold text-sm group-hover:text-[#e8622a] transition-colors">{cmd.title}</h5>
+                        </div>
+                        <div className="text-[10px] text-[#4b5563]">
+                          Originally scheduled for {cmd.id.split('-rule-')[0].split('ai-roadmap-')[0] || 'Previous Day'}
+                        </div>
+                      </div>
+                      <ChevronRight className="text-[#1c1e24] group-hover:text-[#e8622a]/50" size={16} />
+                    </div>
+                  ))}
+                  {state.carryovers.length > 5 && (
+                    <p className="text-[10px] text-center text-[#4b5563] mt-2 font-mono italic">
+                      + {state.carryovers.length - 5} more carried over tasks. Complete these to clear depth.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xs font-mono tracking-widest text-[#6b7280] uppercase">Today Command Queue</h3>
               {todayCompleted.length > 0 && (
